@@ -245,8 +245,8 @@ function playerDetail(p) {
     <div class="card">${seasonPicker(seasons)}<div id="seasonBody">${seasons.length ? playerSeason(seasons[seasons.length - 1]) : '<div class="msg">No seasons</div>'}</div></div>`;
 }
 function formatDay(day) {
-  const seasonDay = day % 91;
-  return `w${Math.floor(seasonDay / 7)+1}d${(seasonDay % 7)+1}`;
+  const seasonDay = (day - 1) % 91 + 1;
+  return `w${Math.floor((seasonDay - 1) / 7)+1}d${((seasonDay - 1) % 7)+1}`;
 }
 function playerSeason(s) {
   return `<h3>Season ${esc(s.id)} — by race</h3>
