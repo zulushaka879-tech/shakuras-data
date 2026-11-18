@@ -78,6 +78,7 @@ function load(data) {
   clubById = Object.fromEntries(clubs.map(c => [c.id, c]));
   playerById = Object.fromEntries(players.map(p => [p.id, p]));
   buildGameRows();
+  buildMaps();
   render();
 }
 
@@ -97,7 +98,8 @@ function buildGameRows() {
     const idx = seen[k] = (seen[k] ?? -1) + 1;
     let race = p.race;
     if (race === RANDOM) race = groups[key(s.id, g.day, g.opponentID, p.id)]?.[idx]?.opponentRace ?? RANDOM;
-    gameRows.push({ p, g, race, oppRace: g.opponentRace });
+    gameRows.push({ p, g, s, race, oppRace: g.opponentRace,
+      uid: `${s.id}|${g.day}|${[p.id, g.opponentID].map(String).sort().join('~')}|${idx}` });
   })));
 }
 
@@ -108,11 +110,12 @@ function route() {
 }
 function render() {
   const { tab, id } = route();
-  const tabs = { clubs: 'Clubs', players: 'Players', races: 'Races', builds: 'Build Orders' };
+  const tabs = { clubs: 'Clubs', players: 'Players', maps: 'Maps', races: 'Races', builds: 'Build Orders' };
   $('#nav').innerHTML = Object.entries(tabs).map(([t, label]) =>
     `<a href="#/${t}" class="${t === tab ? 'on' : ''}">${label}</a>`).join('');
   if (tab === 'builds') buildsView();
   else if (tab === 'players') playersView(id);
+  else if (tab === 'maps') mapsView(id);
   else if (tab === 'races') racesView();
   else clubsView(id);
 }
@@ -233,13 +236,17 @@ function playerDetail(p) {
   let w = 0, l = 0;
   seasons.forEach(s => list(s.games).forEach(g => g.victory ? w++ : l++));
   return `<div class="card"><h2>${shakurasLink("players/", p.id, p.name)} <span class="badge">${esc(p.race)}</span></h2>
-    <div class="m">Club: ${link('clubs', p.clubID, p.club)} · ID ${esc(p.id)}</div>
+    <div class="m">Club: ${link('clubs', p.clubID, p.club)} · XP ${esc(p.xp)}</div>
     <div class="m">Career: ${wl(w, l)} over ${w + l} games in ${seasons.length} season(s)</div>
     <h3>Maps — all seasons</h3>
     ${mapTable(seasons.flatMap(s => list(s.games)))}
     <h3 style="display: none;">Stats</h3>
     <div class="grid" style="display: none;">${(p.stats || []).map((v, i) => `<div class="stat"><b>${v}</b><span>${esc(STAT_LABELS[i] || 'Stat ' + (i + 1))}</span></div>`).join('')}</div></div>
     <div class="card">${seasonPicker(seasons)}<div id="seasonBody">${seasons.length ? playerSeason(seasons[seasons.length - 1]) : '<div class="msg">No seasons</div>'}</div></div>`;
+}
+function formatDay(day) {
+  const seasonDay = day % 91;
+  return `w${Math.floor(seasonDay / 7)+1}d${(seasonDay % 7)+1}`;
 }
 function playerSeason(s) {
   return `<h3>Season ${esc(s.id)} — by race</h3>
@@ -250,7 +257,70 @@ function playerSeason(s) {
     ${tbl(['Opponent', 'Race', 'Score'], list(s.h2h).map(h => [link('players', h.opponentID, h.opponentName), esc(h.opponentRace), wl(...(h.score || [0, 0]))]))}
     <h3>Games</h3>
     ${tbl(['Day', 'Result', 'Opening', 'Map', 'Opponent', 'Race', 'Opp. opening'], list(s.games).map(g => [
-      (g.day - 1)%91+1, result(g.victory), esc(opening(g)), esc(g.map), link('players', g.opponentID, g.opponentName), esc(g.opponentRace), esc(g.opponentOpening)]))}`;
+      formatDay(g.day), result(g.victory), esc(opening(g)), esc(g.map), link('players', g.opponentID, g.opponentName), esc(g.opponentRace), esc(g.opponentOpening)]))}`;
+}
+
+// ---------- Maps ----------
+// Every game is stored once per player, so games are de-duplicated by uid and re-oriented as winner/loser.
+let mapList = [];
+function buildMaps() {
+  const byMap = {}, seen = new Set();
+  gameRows.forEach(({ p, g, s, race, oppRace, uid }) => {
+    if (seen.has(uid)) return;
+    seen.add(uid);
+    const me = { id: p.id, name: p.name, race, opening: opening(g) };
+    const opp = { id: g.opponentID, name: g.opponentName, race: oppRace, opening: g.opponentOpening ?? '' };
+    const name = g.map || 'Unknown';
+    (byMap[name] ??= { id: name, name, games: [] }).games.push({
+      sid: s.id, day: g.day, win: g.victory ? me : opp, lose: g.victory ? opp : me });
+  });
+  mapList = Object.values(byMap).sort((a, b) => a.name.localeCompare(b.name));
+}
+// Win rates per race matchup. Record is from the alphabetically-first race's side; mirrors have no meaningful rate.
+function matchupTable(games) {
+  const mu = {};
+  games.forEach(({ win, lose }) => {
+    const a = win.race || '?', b = lose.race || '?';
+    const [x, y] = a <= b ? [a, b] : [b, a];
+    const e = mu[x + '|' + y] ??= { x, y, xw: 0, yw: 0 };
+    if (x === y) e.xw++; else if (a === x) e.xw++; else e.yw++;
+  });
+  const rows = Object.values(mu).sort((a, b) => (a.x + a.y).localeCompare(b.x + b.y));
+  return rows.length ? tbl(['Matchup', 'Games', 'Record'], rows.map(e => {
+    const n = e.xw + e.yw;
+    return e.x === e.y
+      ? [`<b>${esc(e.x)} vs ${esc(e.y)}</b>`, n, '<span class="m">mirror</span>']
+      : [`<b>${esc(e.x)} vs ${esc(e.y)}</b>`, n, wl(e.xw, e.yw)];
+  })) : '<div class="m">No games</div>';
+}
+function mapsView(id) {
+  splitView({
+    items: mapList, sel: id,
+    searchText: m => m.name,
+    rowHtml: (m, on) => `<a href="#/maps/${encodeURIComponent(m.id)}" class="${on ? 'sel' : ''}"><span>${esc(m.name)}</span><small>${m.games.length} games</small></a>`,
+    detail: mapDetail
+  });
+}
+function mapDetail(m) {
+  const ids = [...new Set(m.games.map(g => g.sid))].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+  const seasons = ids.map(sid => ({ id: sid, games: m.games.filter(g => g.sid === sid) }));
+  m._seasonFn = i => mapSeason(seasons[i]);
+  return `<div class="card"><h2>${esc(m.name)}</h2>
+    <div class="m">${m.games.length} games across ${seasons.length} season(s)</div>
+    <h3>Matchup win rates — all seasons</h3>
+    ${matchupTable(m.games)}
+    <h3>By season</h3>
+    ${tbl(['Season', 'Games'], seasons.map(s => ['Season ' + esc(s.id), s.games.length]))}</div>
+    <div class="card">${seasonPicker(seasons, s => ` – ${s.games.length} games`)}<div id="seasonBody">${seasons.length ? mapSeason(seasons[seasons.length - 1]) : '<div class="msg">No seasons</div>'}</div></div>`;
+}
+function mapSeason(s) {
+  const side = x => `${link('players', x.id, x.name)} <span class="m">(${esc(x.race)})</span>`;
+  const games = [...s.games].sort((a, b) => a.day - b.day);
+  return `<h3>Season ${esc(s.id)} — matchup win rates</h3>
+    ${matchupTable(s.games)}
+    <h3>All matchups played (${games.length})</h3>
+    ${tbl(['Day', 'Winner', 'Opening', 'Loser', 'Opening'], games.map(g => [
+      formatDay(g.day), side(g.win), esc(g.win.opening), side(g.lose), esc(g.lose.opening)]))}`;
 }
 
 // ---------- Races ----------
