@@ -274,12 +274,11 @@
   </main>
 
   <script>
-    if (location.host === "zulushaka879-tech.github.io") {
+    if (location.host !== "zulushaka879-tech.github.io") {
       document.getElementById("upload").style.display = "initial";
       document.getElementById("download").style.display = "none";
-    } else {
-
     }
+
     // ---------- Config ----------
     const DATA_URL = 'export.json.gz';  // path to your exported Export JSON
     // Labels for the fixed-size arrays.
