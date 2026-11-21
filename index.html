@@ -68,7 +68,8 @@
       color: #fff
     }
 
-    header label, header a {
+    header label,
+    header a {
       margin-left: auto;
       color: var(--mut);
       font-size: 12px
@@ -263,8 +264,8 @@
   <header>
     <h1>League Data Viewer</h1>
     <nav id="nav"></nav>
-    <label id="upload" style="display:none;">Load gzipped JSON file: <input type="file" id="file" accept=".gz,application/gzip,application/x-gzip"
-        style="width:auto;margin:0"></label>
+    <label id="upload" style="display:none;">Load gzipped JSON file: <input type="file" id="file"
+        accept=".gz,application/gzip,application/x-gzip" style="width:auto;margin:0"></label>
     <a id="download" href="export.json" download="export.json" target="_blank">
       <input type="button" id="download" value="Download JSON file" style="width:auto;margin:0">
     </a>
@@ -478,11 +479,31 @@
       const seasonDay = (day - 1) % 91 + 1;
       return `w${Math.floor((seasonDay - 1) / 7) + 1}d${((seasonDay - 1) % 7) + 1}`;
     }
+    // Build orders a player used in one season, with overall record and record vs each opposing race.
+    function playerBuilds(s) {
+      const rows = gameRows.filter(r => r.s === s && opening(r.g));
+      const isRandom = rows.some(r => r.p.race === RANDOM);
+      const b = {};
+      rows.forEach(({ g, race }) => {
+        const i = g.victory ? 0 : 1;
+        const e = b[race + '|' + opening(g)] ??= { race, name: opening(g), t: [0, 0], vs: {} };
+        e.t[i]++;
+        (e.vs[g.opponentRace] ??= [0, 0])[i]++;
+      });
+      const vs = (e, r) => e.vs[r] ? wl(e.vs[r][0], e.vs[r][1]) : '–';
+      const out = Object.values(b).sort((x, y) => (y.t[0] + y.t[1]) - (x.t[0] + x.t[1]) || x.name.localeCompare(y.name));
+      return out.length
+        ? tbl(['Build order', ...(isRandom ? ['Race'] : []), 'Games', 'Record', 'vs Protoss', 'vs Terran', 'vs Zerg'],
+          out.map(e => [esc(e.name), ...(isRandom ? [esc(e.race)] : []), e.t[0] + e.t[1], wl(e.t[0], e.t[1]), vs(e, 'P'), vs(e, 'T'), vs(e, 'Z')]))
+        : '<div class="m">No build order data</div>';
+    }
     function playerSeason(s) {
       return `<h3>Season ${esc(s.id)} — by race</h3>
     ${tbl(['vs Protoss', 'vs Terran', 'vs Zerg'], [[...[s.vsP, s.vsT, s.vsZ].map(v => v ? wl(v[0], v[1]) : '–')]])}
     <h3>Maps</h3>
     ${mapTable(list(s.games))}
+    <h3>Build orders</h3>
+    ${playerBuilds(s)}
     <h3>Head-to-head</h3>
     ${tbl(['Opponent', 'Race', 'Score'], list(s.h2h).map(h => [link('players', h.opponentID, h.opponentName), esc(h.opponentRace), wl(...(h.score || [0, 0]))]))}
     <h3>Games</h3>
